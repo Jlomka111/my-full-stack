@@ -1,3 +1,4 @@
+data "aws_caller_identity" "current" {}
 terraform {
   required_version = ">= 1.6"
   
@@ -249,6 +250,7 @@ resource "aws_instance" "app" {
   user_data = templatefile("${path.module}/user-data.sh", {
     db_secret_arn = aws_secretsmanager_secret.db_creds.arn
     aws_region    = var.aws_region
+    aws_account_id = data.aws_caller_identity.current.account_id
   })
   
   root_block_device {
