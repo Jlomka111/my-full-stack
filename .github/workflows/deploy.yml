@@ -20,4 +20,17 @@
             docker compose pull
             docker compose up -d
             
-            echo "✅ Deployment successful!"
+            echo "✅ Deployment successful!
+- name: Run Backend Tests
+        env: # Добавь этот блок
+          PROJECT_NAME: "Test Project"
+          POSTGRES_SERVER: "localhost"
+          POSTGRES_USER: "postgres"
+          POSTGRES_PASSWORD: "password"
+          POSTGRES_DB: "app"
+          FIRST_SUPERUSER: "admin@example.com"
+          FIRST_SUPERUSER_PASSWORD: "password123"
+          SECRET_KEY: "test-secret-key"
+        run: |
+          cd backend
+          pytest
