@@ -1,0 +1,78 @@
+name: Deploy to AWS Free Tier
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-central-1
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Build and push Backend
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd backend
+          docker build -t $ECR_REGISTRY/fastapi-backend:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/fastapi-backend:$IMAGE_TAG \
+                     $ECR_REGISTRY/fastapi-backend:latest
+          docker push $ECR_REGISTRY/fastapi-backend:$IMAGE_TAG
+          docker push $ECR_REGISTRY/fastapi-backend:latest
+      
+      - name: Build and push Frontend
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd frontend
+          docker build -t $ECR_REGISTRY/fastapi-frontend:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/fastapi-frontend:$IMAGE_TAG \
+                     $ECR_REGISTRY/fastapi-frontend:latest
+          docker push $ECR_REGISTRY/fastapi-frontend:$IMAGE_TAG
+          docker push $ECR_REGISTRY/fastapi-frontend:latest
+      
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /opt/app
+            
+            # Login to ECR
+            aws ecr get-login-password --region eu-central-1 | \
+              docker login --username AWS --password-stdin \
+              ${{ steps.login-ecr.outputs.registry }}
+            
+            # Pull new images
+            docker-compose pull
+            
+            # Restart services
+            docker-compose up -d
+            
+            # Health check
+            sleep 10
+            curl -f http://localhost:8000/api/v1/health || exit 1
+            
+            echo "✅ Deployment successful!"

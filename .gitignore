@@ -1,0 +1,16 @@
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfvars
+awscliv2.zip
+awscliv2/
+.env
+__pycache__/
+*.py[cod]
+node_modules/
+dist/
+build/
+.venv/
+venv/
+.DS_Store

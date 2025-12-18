@@ -1,0 +1,2 @@
+Backend ECR: 129670050060.dkr.ecr.eu-central-1.amazonaws.com/fastapi-backendBACKEND_REPO=129670050060.dkr.ecr.eu-central-1.amazonaws.com/fastapi-backend
+Frontend ECR: 129670050060.dkr.ecr.eu-central-1.amazonaws.com/fastapi-frontend
