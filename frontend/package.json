@@ -9,6 +9,7 @@
     "lint": "biome check --write --unsafe --no-errors-on-unmatched --files-ignore-unknown=true ./",
     "preview": "vite preview",
     "generate-client": "openapi-ts"
+    "test": "echo 'No tests yet'"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
