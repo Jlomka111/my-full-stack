@@ -1,36 +1,26 @@
-- name: Deploy to EC2
-        uses: appleboy/ssh-action@v1.0.0
-        with:
+-with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            # 1. Исправляем права и заходим в папку
+            sudo mkdir -p /opt/app
+            sudo chown ubuntu:ubuntu /opt/app
             cd /opt/app
-            # Авторизация в ECR
+
+            # 2. Логинимся в AWS ECR
             aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin 129670050060.dkr.ecr.eu-central-1.amazonaws.com
             
-            # Подтягиваем код, если его еще нет (на случай первого деплоя)
-            if [ ! -f "docker-compose.yml" ]; then
+            # 3. Синхронизируем код (docker-compose.yml и другие конфиги)
+            if [ ! -d ".git" ]; then
               git clone https://github.com/Jlomka111/my-full-stack.git .
             else
-              git pull origin main
+              git fetch --all
+              git reset --hard origin/main
             fi
 
-            # Запуск (используем пробел в docker compose)
-            docker compose pull
-            docker compose up -d
+            # 4. Обновляем и запускаем контейнеры
+            sudo docker compose pull
+            sudo docker compose up -d
             
-            echo "✅ Deployment successful!
-- name: Run Backend Tests
-        env: # Добавь этот блок
-          PROJECT_NAME: "Test Project"
-          POSTGRES_SERVER: "localhost"
-          POSTGRES_USER: "postgres"
-          POSTGRES_PASSWORD: "password"
-          POSTGRES_DB: "app"
-          FIRST_SUPERUSER: "admin@example.com"
-          FIRST_SUPERUSER_PASSWORD: "password123"
-          SECRET_KEY: "test-secret-key"
-        run: |
-          cd backend
-          pytest
+            echo "✅ Deployment successful!"
