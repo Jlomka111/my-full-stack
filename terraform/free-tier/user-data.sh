@@ -1,65 +1,71 @@
 #!/bin/bash
-set -e
 
-# Логирование
-exec > >(tee /var/log/user-data.log)
-exec 2>&1
+# 1. Логирование (все выводы пойдут в /var/log/user-data.log)
+exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
-echo "Starting user data script..."
+set -e # Прекратить выполнение при ошибке
 
-# Обновление системы
-apt-get update
+echo "--- [1/6] Обновление системы и установка зависимостей ---"
+apt-get update -y
 apt-get upgrade -y
+apt-get install -y \
+    curl \
+    git \
+    jq \
+    docker.io \
+    docker-compose-v2 \
+    awscli
 
-# Установка Docker
-sh get-docker.sh
-systemctl enable docker
-systemctl start docker
+# Включаем Docker
+systemctl enable --now docker
+usermod -aG docker ubuntu
 
-# Docker Compose
-curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
+echo "--- [2/6] Получение метаданных инстанса (IMDSv2) ---"
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+PUBLIC_IP=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/public-ipv4)
 
-# AWS CLI
-apt-get install -y awscli jq
+echo "--- [3/6] Настройка директорий приложения ---"
+APP_DIR="/opt/app"
+mkdir -p $APP_DIR
+chown ubuntu:ubuntu $APP_DIR
 
-# Создание пользователя для приложения
-useradd -m -s /bin/bash appuser
-usermod -aG docker appuser
+echo "--- [4/6] Получение секретов из AWS Secrets Manager ---"
+# Мы используем ARN секрета, который Terraform передаст в этот скрипт
+SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id ${db_secret_arn} --region ${aws_region} --query SecretString --output text)
 
-# Создание директории для приложения
-mkdir -p /opt/app
-chown appuser:appuser /opt/app
+DB_HOST=$(echo $SECRET_JSON | jq -r .host)
+DB_PASS=$(echo $SECRET_JSON | jq -r .password)
+DB_USER=$(echo $SECRET_JSON | jq -r .username)
+DB_NAME=$(echo $SECRET_JSON | jq -r .dbname)
 
-# Получение credentials из Secrets Manager
-DB_SECRET=$(aws secretsmanager get-secret-value \
-  --secret-id ${db_secret_arn} \
-  --region ${aws_region} \
-  --query SecretString \
-  --output text)
-
-DB_HOST=$(echo $DB_SECRET | jq -r .host)
-DB_PASSWORD=$(echo $DB_SECRET | jq -r .password)
-
-# Создание .env файла
-cat > /opt/app/.env << EOF
-DOMAIN=\$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+echo "--- [5/6] Создание файла конфигурации .env ---"
+# Этот файл будет использовать docker-compose
+cat > $APP_DIR/.env << EOF
+# Основные настройки
+DOMAIN=$PUBLIC_IP
 ENVIRONMENT=production
-PROJECT_NAME="FastAPI Project"
-BACKEND_CORS_ORIGINS=["http://\$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)"]
+PROJECT_NAME="FastAPI-Project"
 SECRET_KEY=$(openssl rand -base64 32)
-FIRST_SUPERUSER=admin@example.com
-FIRST_SUPERUSER_PASSWORD=changethis123
 
+# Настройки базы данных (из RDS)
 POSTGRES_SERVER=$DB_HOST
 POSTGRES_PORT=5432
-POSTGRES_DB=fastapi_db
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=$DB_PASSWORD
+POSTGRES_DB=$DB_NAME
+POSTGRES_USER=$DB_USER
+POSTGRES_PASSWORD=$DB_PASS
 
-FRONTEND_HOST=http://\$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+# Настройки CORS и хостов
+BACKEND_CORS_ORIGINS=["http://$PUBLIC_IP", "http://localhost"]
+FRONTEND_HOST=http://$PUBLIC_IP
+
+# Настройки ECR
+ECR_URL=${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com
 EOF
 
-chown appuser:appuser /opt/app/.env
+chown ubuntu:ubuntu $APP_DIR/.env
 
-echo "User data script completed!"
+echo "--- [6/6] Авторизация в Docker Registry (ECR) ---"
+aws ecr get-login-password --region ${aws_region} | \
+    docker login --username AWS --password-stdin ${aws_account_id}.dkr.ecr.${aws_region}.amazonaws.com
+
+echo "--- ✅ USER DATA COMPLETED СUCCESSFULLY ---"
